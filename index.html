@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>LUNA Dance Floor Dash - game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #111827;
+            color: #fff;
+            overflow: hidden;
+            touch-action: manipulation; /* Prevents double-tap zoom on mobile */
+        }
+        .game-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        canvas {
+            background: linear-gradient(180deg, #1f2937 0%, #374151 100%);
+            border-radius: 1rem;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.1);
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .modal {
+            background-color: rgba(17, 24, 39, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .luna-logo {
+            font-weight: 700;
+            font-size: 1.5rem;
+            letter-spacing: 2px;
+        }
+        .luna-logo .moon {
+            display: inline-block;
+            transform: rotate(-20deg);
+        }
+        .btn-primary {
+            background: linear-gradient(45deg, #f9a8d4, #c084fc);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(192, 132, 252, 0.4);
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(192, 132, 252, 0.6);
+        }
+    </style>
+</head>
+<body class="overflow-hidden">
+
+    <div id="game-container" class="game-container">
+        <div id="score-display" class="absolute top-4 left-4 text-2xl font-bold z-20 hidden">
+            SCORE: <span id="score">0</span>
+        </div>
+        <div id="hiscore-display" class="absolute top-4 right-4 text-lg font-bold z-20 hidden">
+            BEST: <span id="hiscore">0</span>
+        </div>
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <!-- Start Modal -->
+    <div id="startModal" class="absolute inset-0 flex items-center justify-center z-30">
+        <div class="modal text-center p-8 rounded-2xl max-w-sm w-11/12 mx-auto shadow-lg">
+            <h1 class="luna-logo">LUNA <span class="moon">🌙</span></h1>
+            <h2 class="text-3xl font-bold mt-2 mb-4">Dance Floor Dash!</h2>
+            <p class="mb-6 text-gray-300">Przetrwaj na parkiecie jak najdłużej! Dotknij ekranu, by zmienić kierunek.</p>
+            <p class="mb-6 text-gray-300">Omijaj rozlane drinki 🍹 i dzikich tancerzy 🕺!</p>
+            <button id="startButton" class="btn-primary text-white font-bold py-3 px-8 rounded-full text-lg">START</button>
+        </div>
+    </div>
+
+    <!-- Game Over Modal -->
+    <div id="gameOverModal" class="absolute inset-0 flex items-center justify-center z-30 hidden">
+        <div class="modal text-center p-8 rounded-2xl max-w-sm w-11/12 mx-auto shadow-lg">
+            <h2 id="gameOverTitle" class="text-3xl font-bold mb-2">KONIEC GRY</h2>
+            <p id="gameOverReason" class="text-gray-300 mb-4">Niezły taniec!</p>
+            <div class="my-4">
+                <p class="text-lg">Twój wynik:</p>
+                <p id="finalScore" class="text-5xl font-bold text-fuchsia-400">0</p>
+            </div>
+             <div class="my-4">
+                <p class="text-sm">Najlepszy wynik:</p>
+                <p id="finalHiScore" class="text-2xl font-bold text-gray-300">0</p>
+            </div>
+            <p class="text-xs text-gray-400 mt-6 mb-4">Zrób screena i oznacz @LUNACLUB na Instagramie, aby wziąć udział w comiesięcznym konkursie!</p>
+            <button id="restartButton" class="btn-primary text-white font-bold py-3 px-8 rounded-full text-lg">ZAGRAJ PONOWNIE</button>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI Elements
+        const startModal = document.getElementById('startModal');
+        const gameOverModal = document.getElementById('gameOverModal');
+        const startButton = document.getElementById('startButton');
+        const restartButton = document.getElementById('restartButton');
+        const scoreDisplay = document.getElementById('score-display');
+        const hiscoreDisplay = document.getElementById('hiscore-display');
+        const scoreEl = document.getElementById('score');
+        const hiscoreEl = document.getElementById('hiscore');
+        const finalScoreEl = document.getElementById('finalScore');
+        const finalHiScoreEl = document.getElementById('finalHiScore');
+        const gameOverTitle = document.getElementById('gameOverTitle');
+        const gameOverReason = document.getElementById('gameOverReason');
+
+        // Game State
+        let player, obstacles, collectibles, score, hiscore, gameOver, animationId, speed, spawnTimer;
+        const HI_SCORE_KEY = 'lunaDashHiScore';
+
+        // Emojis as "sprites"
+        const PLAYER_EMOJI = '💃';
+        const OBSTACLE_DRINK_EMOJI = '🍹';
+        const OBSTACLE_DANCER_EMOJI = '🕺';
+        const COLLECTIBLE_EMOJI = '🎵';
+
+        // --- GAME SETUP ---
+        function setCanvasDimensions() {
+            const size = Math.min(window.innerWidth * 0.95, window.innerHeight * 0.9, 500);
+            canvas.width = size;
+            canvas.height = size;
+        }
+
+        function init() {
+            setCanvasDimensions();
+            
+            const playerSize = canvas.width / 15;
+            player = {
+                x: canvas.width / 2,
+                y: canvas.height - playerSize * 2,
+                size: playerSize,
+                dx: 1, // 1 for right, -1 for left
+                dy: -1 // Always moving up
+            };
+
+            obstacles = [];
+            collectibles = [];
+            score = 0;
+            hiscore = localStorage.getItem(HI_SCORE_KEY) || 0;
+            gameOver = false;
+            speed = canvas.width / 200;
+            spawnTimer = 0;
+
+            scoreEl.innerText = 0;
+            hiscoreEl.innerText = hiscore;
+            scoreDisplay.classList.remove('hidden');
+            hiscoreDisplay.classList.remove('hidden');
+        }
+
+        // --- GAME OBJECTS ---
+        function drawPlayer() {
+            ctx.font = `${player.size}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(PLAYER_EMOJI, player.x, player.y);
+        }
+
+        function drawObstacles() {
+            obstacles.forEach(obstacle => {
+                ctx.font = `${obstacle.size}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(obstacle.emoji, obstacle.x, obstacle.y);
+            });
+        }
+        
+        function drawCollectibles() {
+            collectibles.forEach(collectible => {
+                ctx.font = `${collectible.size}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(COLLECTIBLE_EMOJI, collectible.x, collectible.y);
+            });
+        }
+
+
+        // --- GAME LOGIC ---
+        function updateGame() {
+            // Move Player
+            player.x += player.dx * speed;
+            player.y += player.dy * speed;
+
+            // Wall collision for player
+            if (player.x + player.size / 2 > canvas.width || player.x - player.size / 2 < 0) {
+                player.dx *= -1;
+            }
+            // If player reaches top, reset to bottom (infinite scroll effect)
+            if (player.y + player.size / 2 < 0) {
+                player.y = canvas.height + player.size / 2;
+                score += 100; // Bonus for reaching the top
+                speed *= 1.05; // Increase difficulty
+            }
+
+            // Move & check obstacles
+            obstacles.forEach((obstacle, index) => {
+                obstacle.y += speed * 0.8; // Obstacles move down slower than player
+                if (obstacle.y - obstacle.size > canvas.height) {
+                    obstacles.splice(index, 1);
+                }
+                
+                // Collision with player
+                const dist = Math.hypot(player.x - obstacle.x, player.y - obstacle.y);
+                if (dist < player.size / 2 + obstacle.size / 2) {
+                    endGame(obstacle.type);
+                }
+            });
+            
+             // Move & check collectibles
+            collectibles.forEach((collectible, index) => {
+                collectible.y += speed * 0.8; 
+                // Collision with player
+                const dist = Math.hypot(player.x - collectible.x, player.y - collectible.y);
+                if (dist < player.size / 2 + collectible.size / 2) {
+                    collectibles.splice(index, 1);
+                    score += 50;
+                } else if (collectible.y - collectible.size > canvas.height) {
+                    collectibles.splice(index, 1);
+                }
+            });
+
+            // Spawn new objects
+            spawnTimer++;
+            if (spawnTimer > 60 / (speed / 2)) {
+                spawnTimer = 0;
+                const type = Math.random() > 0.3 ? 'dancer' : 'drink';
+                const size = canvas.width / (type === 'dancer' ? 10 : 18);
+                obstacles.push({
+                    x: Math.random() * (canvas.width - size) + size / 2,
+                    y: -size,
+                    size: size,
+                    emoji: type === 'dancer' ? OBSTACLE_DANCER_EMOJI : OBSTACLE_DRINK_EMOJI,
+                    type: type
+                });
+                
+                // Spawn a collectible occasionally
+                if (Math.random() > 0.5) {
+                    const collectibleSize = canvas.width / 20;
+                    collectibles.push({
+                        x: Math.random() * (canvas.width - collectibleSize) + collectibleSize / 2,
+                        y: -collectibleSize,
+                        size: collectibleSize
+                    });
+                }
+            }
+
+            score++;
+            scoreEl.innerText = score;
+            if (score > hiscore) {
+                hiscore = score;
+                hiscoreEl.innerText = hiscore;
+                localStorage.setItem(HI_SCORE_KEY, hiscore);
+            }
+        }
+        
+        function endGame(reason) {
+            gameOver = true;
+            cancelAnimationFrame(animationId);
+            gameOverModal.classList.remove('hidden');
+            scoreDisplay.classList.add('hidden');
+            hiscoreDisplay.classList.add('hidden');
+
+            finalScoreEl.innerText = score;
+            finalHiScoreEl.innerText = hiscore;
+            
+            if (reason === 'drink') {
+                gameOverTitle.innerText = "Ups! Mokra plama!";
+                gameOverReason.innerText = "Ktoś tu wylał drinka na parkiecie.";
+            } else if (reason === 'dancer') {
+                 gameOverTitle.innerText = "Król Parkietu!";
+                 gameOverReason.innerText = "Zablokował Cię najbardziej szalony tancerz.";
+            }
+        }
+
+        function animate() {
+            if (gameOver) return;
+            animationId = requestAnimationFrame(animate);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawPlayer();
+            drawObstacles();
+            drawCollectibles();
+            updateGame();
+        }
+
+
+        // --- EVENT LISTENERS ---
+        function handleUserInteraction() {
+            if (!gameOver) {
+                player.dx *= -1;
+            }
+        }
+
+        canvas.addEventListener('click', handleUserInteraction);
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // prevent click event from firing too
+            handleUserInteraction();
+        }, { passive: false });
+
+        startButton.addEventListener('click', () => {
+            startModal.classList.add('hidden');
+            init();
+            animate();
+        });
+
+        restartButton.addEventListener('click', () => {
+            gameOverModal.classList.add('hidden');
+            init();
+            animate();
+        });
+
+        window.addEventListener('resize', () => {
+             // Only resize if game hasn't started or is over
+            if (startModal.classList.contains('hidden') && gameOverModal.classList.contains('hidden')) {
+               // Game is running, perhaps just end it to avoid weird scaling issues
+               endGame('resize');
+            } else {
+                setCanvasDimensions();
+            }
+        });
+        
+        // Initial load
+        setCanvasDimensions();
+
+    </script>
+</body>
+</html>
